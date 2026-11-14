@@ -655,7 +655,8 @@ function income(P) {
   return { h: s.h, p: s.p, extra: extra, total: s.p + extra, fut: s.pf };
 }
 function routeKm(r) { return r.km * (r.round ? 2 : 1); }
-function routeCost(r) { return routeKm(r) * S.fuel.cons / 100 * S.fuel.price; }
+function routeCons(r) { return r.cons > 0 ? r.cons : S.fuel.cons; }
+function routeCost(r) { return routeKm(r) * routeCons(r) / 100 * S.fuel.price; }
 function routeWeekly(r) { return routeCost(r) * r.perWeek; }
 function fuelWeekly() { return S.routes.reduce(function (t, r) { return t + routeWeekly(r); }, 0); }
 function fuelCovered(P) { return S.fills.reduce(function (s, f) { return f.gf && f.date >= P.a && f.date <= P.b ? s + f.amount : s; }, 0); }
@@ -1201,28 +1202,29 @@ function openIncome() {
 
 /* ---------- Paliwo ---------- */
 function vFuel() {
-  var wk = fuelWeekly(), lit = S.routes.reduce(function (t, r) { return t + routeKm(r) * r.perWeek * S.fuel.cons / 100; }, 0), km = S.routes.reduce(function (t, r) { return t + routeKm(r) * r.perWeek; }, 0);
+  var wk = fuelWeekly(), lit = S.routes.reduce(function (t, r) { return t + routeKm(r) * r.perWeek * routeCons(r) / 100; }, 0), km = S.routes.reduce(function (t, r) { return t + routeKm(r) * r.perWeek; }, 0);
   var P = period('month', new Date()), inc = income(P), fc = S.cats.filter(function (c) { return c.id === 'fuel'; })[0], lim = fc ? catLimit(fc, P, inc.total) : 0, plan = fuelPlanned(P);
   var h = head('Paliwo', 'Ile kosztują Twoje dojazdy (z tego, ile auto pali i ile kosztuje paliwo).', '<button type="button" class="btn primary" data-act="route-add">Dodaj trasę</button>');
   h += fuelTank();
   h += fuelWeek();
   h += '<section class="card"><h2>Auto</h2>' + slider('Ile auto pali (litrów na 100 km)', 'f-cons', S.fuel.cons, 3, 15, .1, 'fuel-cons') + slider('Cena litra paliwa (zł)', 'f-price', S.fuel.price, 3, 10, .05, 'fuel-price') + slider('Pojemność baku (litry)', 'f-tank', S.fuel.tank || 45, 20, 80, 1, 'fuel-tank') + '</section>';
   h += '<section class="card"><h2>Trasy</h2>' + (S.routes.length ? '<div class="list">' + S.routes.map(function (r) {
-    return '<div class="item"><div class="t"><b>' + esc(r.name) + '</b><div class="hint">' + num(r.km) + ' km' + (r.round ? ' tam i z powrotem' : '') + ' · ' + num(r.perWeek) + '× w tygodniu · ' + money(routeCost(r)) + ' za przejazd</div></div><span class="amt">' + money(routeWeekly(r)) + '<span class="muted"> / tydz.</span></span><button type="button" class="btn sm" data-act="route-edit" data-id="' + r.id + '">Edytuj</button><button type="button" class="btn sm danger" data-act="route-del" data-id="' + r.id + '">Usuń</button></div>';
+    return '<div class="item"><div class="t"><b>' + esc(r.name) + '</b><div class="hint">' + num(r.km) + ' km' + (r.round ? ' tam i z powrotem' : '') + ' · ' + num(r.perWeek) + '× w tygodniu' + (r.cons > 0 ? ' · ' + num(r.cons) + ' l/100 km' : '') + ' · ' + money(routeCost(r)) + ' za przejazd</div></div><span class="amt">' + money(routeWeekly(r)) + '<span class="muted"> / tydz.</span></span><button type="button" class="btn sm" data-act="route-edit" data-id="' + r.id + '">Edytuj</button><button type="button" class="btn sm danger" data-act="route-del" data-id="' + r.id + '">Usuń</button></div>';
   }).join('') + '</div>' : '<p class="hint">Dodaj trasę, np. „Dojazd do dziewczyny”: 80 km, 5 razy w tygodniu.</p>') + '</section>';
   h += '<section class="card"><h2>Razem</h2><div class="grid" style="margin-top:.85rem">' + [['Tygodniowo', money(wk)], ['Miesięcznie (średnio)', money(wk * 52 / 12)], ['Rocznie', money(wk * 52)]].map(function (x) { return '<div class="tile"><span class="eyebrow">' + x[0] + '</span><span class="v">' + x[1] + '</span></div>'; }).join('') + '</div>' +
     '<p class="hint" style="margin-top:.85rem">Tygodniowo: ' + num(km, 0) + ' km i ' + num(lit) + ' l paliwa. Z budżetu (kategoria „Paliwo”) schodzą tylko kwoty z tankowań, które sam zapłaciłeś. Zaznaczone przejazdy zużywają litry z baku.</p></section>';
   if (fc) h += '<section class="card"><h2>Limit paliwa w ' + esc(P.label.toLowerCase()) + '</h2><div class="stack">' + bar(lim > 0 ? plan / lim : (plan > 0 ? 2 : 0), plan > lim ? 'bad' : plan >= lim * .8 ? 'warn' : '') + '<p>' + money(plan) + ' <span class="muted">wydane na tankowania, limit ' + money(lim) + '</span></p></div></section>';
-  h += '<div id="tc-slot"></div>';
+  if ((ui.sub.paliwo || 0) === 2) h += '<div id="tc-slot"></div>';
   return h;
 }
-function routeRead() { return { name: v('r-name').trim(), km: parseNum(v('r-km')), perWeek: parseNum(v('r-wk')), round: chk('r-round') }; }
-function openRoute(id) {
-  var r = id ? S.routes.filter(function (x) { return x.id === id; })[0] : { name: '', km: 0, perWeek: 5, round: false };
-  ui.edit = id || null;
+function routeRead() { return { name: v('r-name').trim(), km: parseNum(v('r-km')), perWeek: parseNum(v('r-wk')), round: chk('r-round'), cons: parseNum(v('r-cons')) }; }
+function openRoute(id, pre) {
+  var r = id ? S.routes.filter(function (x) { return x.id === id; })[0] : (pre ? Object.assign({ perWeek: 5, round: true }, pre) : { name: '', km: 0, perWeek: 5, round: false });
+  ui.edit = id || null; ui.fromCalc = !id && !!pre;
   openModal(modal(id ? 'Edytuj trasę' : 'Nowa trasa',
     field('Nazwa trasy', 'r-name', r.name, 'maxlength="60" placeholder="np. Dojazd do dziewczyny"') +
     '<div class="fields">' + field('Dystans (km)', 'r-km', numStr(r.km), 'inputmode="decimal" data-live="route"') + field('Ile razy w tygodniu planujesz jechać', 'r-wk', numStr(r.perWeek), 'inputmode="decimal" data-live="route"') + '</div>' +
+    field('Spalanie na tej trasie (l/100 km)', 'r-cons', r.cons > 0 ? numStr(r.cons) : '', 'inputmode="decimal" data-live="route" placeholder="puste = średnia auta, ' + numStr(S.fuel.cons) + '"') +
     '<label class="check"><input type="checkbox" id="r-round" data-live="route"' + (r.round ? ' checked' : '') + '>Trasa tam i z powrotem (dystans liczę podwójnie)</label><p class="hint" id="r-prev"></p>',
     '<button type="button" class="btn" data-act="close">Anuluj</button><button type="button" class="btn primary" data-act="route-save" data-primary>Zapisz</button>'));
   LIVE.route();
@@ -1690,7 +1692,7 @@ var TCT = { m: ['Miasto', 'c4'], l: ['Lokalne', 'c3'], k: ['Krajowe', 'c1'], e: 
 var TCN = { m: 'Miasto i wolne drogi (~50 km/h)', k: 'Droga krajowa (~90 km/h)', e: 'Ekspresowa i autostrada (~120 km/h)' };
 var TCG = { 'Najszybsza': 'fast', 'Najkrótsza': 'short', 'Spokojniejsza': 'calm', 'Jedyna trasa': 'one' };
 
-function tcQ(id) { return document.getElementById(id); }
+function tcQ(id) { return tc.root ? tc.root.querySelector('#' + id) : null; }
 function tcEl(w) { return tcQ('tc-' + w); }
 function tcNum(s) { var n = parseFloat(String(s).replace(/\s/g, '').replace(',', '.')); return isNaN(n) ? NaN : n; }
 function tcF(n, d) { return (+n).toFixed(d).replace('.', ','); }
@@ -1888,13 +1890,13 @@ function tcSuggest(w, q) {
   }).catch(function (e) { if (my === tc.seq[w]) tcMsg(tcErrMsg(e), 'bad'); });
 }
 function tcSetPoint(w, lat, lon, label) {
-  tc.pt[w] = { lat: lat, lon: lon, label: label };
+  tc.pt[w] = { lat: lat, lon: lon, label: label, short: label };
   tcMarker(w); tcFitPoints();
   tcFound(w, tcInPl(lat, lon) ? 'Współrzędne: ' + tcF(lat, 5) + ', ' + tcF(lon, 5) : 'Uwaga: te współrzędne są poza Polską.');
 }
 function tcPickRes(w, r) {
   var lab = tcLabel(r); tcEl(w).value = lab;
-  tc.pt[w] = { lat: +r.lat, lon: +r.lon, label: lab };
+  tc.pt[w] = { lat: +r.lat, lon: +r.lon, label: lab, short: tcName(r) };
   tcMarker(w); tcFound(w, r.display_name || ''); tcFitPoints();
 }
 function tcClearRoutes() {
@@ -2066,7 +2068,7 @@ function tcRenderCalc() {
     return '<div class="tc-line"><span>' + TCN[k] + '</span><b>' + tcF(r.an.cat[k], 1) + ' km</b><span>' + tcF(TC.rates[k], 1) + ' l/100</span><b>' + tcF(r.an.cat[k] * TC.rates[k] / 100, 2) + ' l</b></div>';
   }).join('') + '</div><div class="tc-total"><div><span>Zużycie</span><b>' + tcF(f.l, 2) + ' l</b></div><div><span>Koszt</span><b>' + money(f.cost) + '</b></div><div><span>Średnio</span><b>' + tcF(f.avg, 1) + ' l/100 km</b></div></div>' +
     '<p class="hint tc-est">To szacunek z dokładnością ok. ±15%. Nie uwzględnia ruchu, wzniesień, pogody ani stylu jazdy.</p>' +
-    '<div class="row" style="margin-top:.8rem"><button type="button" class="btn primary" data-tc="save">Zapisz trasę do historii</button></div>' +
+    '<div class="row" style="margin-top:.8rem"><button type="button" class="btn primary" data-tc="save">Zapisz trasę</button><button type="button" class="btn sm" data-tc="hist">Tylko do historii</button></div><p class="hint" style="margin-top:.5rem">„Zapisz trasę” dodaje ją do listy Trasy wyżej, więc liczy się w Baku, Tygodniu i Kosztach, z Twoim spalaniem na tej trasie.</p>' +
     '<details class="more-opt"><summary>Jak liczę</summary><p class="hint" style="margin-top:.6rem">Każdy odcinek trasy (krok z OSRM) trafia do jednej z trzech kategorii spalania. Autostrady i drogi ekspresowe (oznaczenia A i S) liczę wg stawki dla ~120 km/h, drogi krajowe wg ~90 km/h. Miasto i wolne odcinki (poniżej 45 km/h) liczę wg ~50 km/h. Drogi lokalne i wojewódzkie: od 70 km/h wg stawki krajowej, wolniejsze wg miejskiej. Litry to suma kilometrów w każdej kategorii razy jej stawka, a nie jedna średnia. Prędkości pochodzą z modelu OSRM, nie z ruchu na żywo.</p></details>';
 }
 function tcRenderHist() {
@@ -2107,7 +2109,7 @@ function tcManual() {
   if (!(km > 0)) { tc.man = null; out.innerHTML = '<span class="hint">Wpisz kilometry w co najmniej jednej kategorii.</span>'; return; }
   var f = tcFuel({ cat: { m: q[0], k: q[1], e: q[2] }, tot: km });
   tc.man = { km: km, f: f };
-  out.innerHTML = '<b>' + tcF(f.l, 2) + ' l</b> · <b>' + money(f.cost) + '</b> · śr. ' + tcF(f.avg, 1) + ' l/100 km (' + tcF(km, 1) + ' km)<div class="row" style="margin-top:.7rem"><button type="button" class="btn sm primary" data-tc="msave">Zapisz do historii</button></div>';
+  out.innerHTML = '<b>' + tcF(f.l, 2) + ' l</b> · <b>' + money(f.cost) + '</b> · śr. ' + tcF(f.avg, 1) + ' l/100 km (' + tcF(km, 1) + ' km)<div class="row" style="margin-top:.7rem"><button type="button" class="btn sm primary" data-tc="mroute">Zapisz trasę</button><button type="button" class="btn sm" data-tc="msave">Tylko do historii</button></div>';
 }
 function tcHistAdd(e) {
   e.id = uid(); e.at = new Date().toISOString();
@@ -2116,6 +2118,11 @@ function tcHistAdd(e) {
 }
 function tcSaveRoute() {
   var r = tc.routes[tc.act]; if (!r) return;
+  var f = tcFuel(r.an), a = tc.pt.from && (tc.pt.from.short || tc.pt.from.label), b = tc.pt.to && (tc.pt.to.short || tc.pt.to.label);
+  openRoute(null, { name: a && b ? a + ' → ' + b : '', km: +r.km.toFixed(1), cons: +f.avg.toFixed(1) });
+}
+function tcSaveHist() {
+  var r = tc.routes[tc.act]; if (!r) return;
   var f = tcFuel(r.an);
   tcHistAdd({ from: (tc.pt.from && tc.pt.from.label) || tcEl('from').value.trim(), to: (tc.pt.to && tc.pt.to.label) || tcEl('to').value.trim(), km: Math.round(r.km * 100) / 100, l: Math.round(f.l * 1000) / 1000, cost: Math.round(f.cost * 100) / 100, price: TC.price });
 }
@@ -2123,7 +2130,8 @@ function tcHistDel(id) { TC.hist = TC.hist.filter(function (x) { return x.id !==
 
 /* --- budowa i podpięcie modułu (jeden trwały element, przenoszony do widoku Paliwo) --- */
 var TCA = {
-  swap: tcSwap, go: tcRoute, save: tcSaveRoute, defaults: tcDefaults,
+  swap: tcSwap, go: tcRoute, save: tcSaveRoute, hist: tcSaveHist, defaults: tcDefaults,
+  mroute: function () { if (tc.man) openRoute(null, { name: '', km: +tc.man.km.toFixed(1), cons: +tc.man.f.avg.toFixed(1) }); },
   armfrom: function () { tcArm('from'); }, armto: function () { tcArm('to'); },
   pick: function (b) { tcSelect(+b.dataset.i); }, sug: function (b) { tcChoose(b.dataset.w, +b.dataset.i); },
   hdel: function (b) { tcHistDel(b.dataset.id); },
@@ -2166,8 +2174,8 @@ function tcBind(el) {
   document.addEventListener('mousedown', function (e) { if (!e.target.closest || !e.target.closest('.tc-ac')) tcCloseSug(); });
 }
 function tcMount() {
-  var slot = tcQ('tc-slot');
-  if (!slot) return;
+  var slot = document.getElementById('tc-slot');
+  if (!slot) { if (tc.root && tc.root.parentNode) tc.root.parentNode.removeChild(tc.root); return; }
   if (!tc.root) { tc.root = tcBuild(); tcBind(tc.root); }
   if (tc.root.parentNode !== slot) slot.appendChild(tc.root);
   if (!tc.storeInit) { tcRenderAll(); tcStoreInit(); }
@@ -2406,7 +2414,7 @@ var LIVE = {
   sched: function () { var p = schedPlan(), el = $('#s-prev'); if (el) { var hrs = p.ds.length * p.r.h; el.textContent = p.ds.length ? 'Wpisanych zostanie ' + p.ds.length + ' dni, razem ' + num(hrs) + ' h, ok. ' + money(p.ds.reduce(function (t, d) { return t + p.r.h * rateAt(d); }, 0)) + '.' : 'Brak dni do wpisania dla tych ustawień.'; } },
   route: function () {
     var r = routeRead(), el = $('#r-prev'); if (!el) return;
-    var c = routeKm(r) * S.fuel.cons / 100 * S.fuel.price, w = c * r.perWeek;
+    var c = routeKm(r) * routeCons(r) / 100 * S.fuel.price, w = c * r.perWeek;
     el.textContent = r.km > 0 ? 'Przejazd: ' + money(c) + ' · tydzień: ' + money(w) + ' · miesiąc: ' + money(w * 52 / 12) + ' · rok: ' + money(w * 52) : 'Wpisz dystans, a policzę koszt.';
   }
 };
@@ -2637,8 +2645,9 @@ var ACT = {
     if (!r.name) { merr('Podaj nazwę trasy.'); return; }
     if (r.km <= 0) { merr('Dystans musi być większy od zera.'); return; }
     if (r.perWeek <= 0) { merr('Liczba przejazdów musi być większa od zera.'); return; }
+    var fc = !ui.edit && ui.fromCalc; ui.fromCalc = false;
     if (ui.edit) Object.assign(byId(S.routes, ui.edit), r); else { r.id = uid(); S.routes.push(r); }
-    commit();
+    commit(fc ? 'Dodano trasę do listy Trasy.' : undefined);
   },
   'route-del': function (el) { snap(); S.routes = S.routes.filter(function (r) { return r.id !== el.dataset.id; }); save(); render(); toast('Usunięto trasę.', true); },
   'goal-add': function () { openGoal(null); },
